@@ -4,11 +4,9 @@
 import os
 import asyncio
 import re
-import logging
 from typing import Optional
+from loguru import logger
 from gigachat import GigaChat
-
-logger = logging.getLogger(__name__)
 
 
 # Описание схемы базы данных для промпта
@@ -224,7 +222,11 @@ class SQLQueryGenerator:
         try:
             # Нормализуем вопрос
             normalized_query = self._normalize_query(user_query)
-            logger.info(f"Генерация SQL для вопроса: {normalized_query}")
+            logger.info(
+                "Генерация SQL для вопроса",
+                original_query=user_query[:200],
+                normalized_query=normalized_query[:200]
+            )
             
             # Формируем полный промпт с четкой инструкцией
             full_prompt = f"""{SYSTEM_PROMPT}
@@ -242,7 +244,11 @@ class SQLQueryGenerator:
                 full_prompt
             )
             
-            logger.debug(f"Ответ от GigaChat: {response}")
+            logger.debug(
+                "Ответ от GigaChat получен",
+                response_type=type(response).__name__,
+                has_choices=hasattr(response, 'choices') and len(response.choices) > 0 if hasattr(response, 'choices') else False
+            )
             
             # Извлекаем текст ответа
             text = None
@@ -267,7 +273,11 @@ class SQLQueryGenerator:
                 if not text:
                     raise Exception(f"Неожиданный формат ответа от GigaChat: {type(response)}, атрибуты: {dir(response)}")
             
-            logger.debug(f"Извлеченный текст: {text[:200]}")
+            logger.debug(
+                "Извлеченный текст из ответа",
+                text_preview=text[:200] if text else None,
+                text_length=len(text) if text else 0
+            )
             
             # Очищаем ответ от markdown форматирования
             if "```sql" in text:
@@ -321,7 +331,12 @@ class SQLQueryGenerator:
                                     text = text[:marker_pos].strip()
                                     break
                 else:
-                    logger.error(f"Ответ не содержит SQL запрос: {text[:200]}")
+                    logger.error(
+                        "Ответ не содержит SQL запрос",
+                        response_text=text[:200] if text else None,
+                        response_length=len(text) if text else 0,
+                        normalized_query=normalized_query[:200]
+                    )
                     raise Exception(f"Ответ не содержит SQL запрос. Получено: {text[:100]}...")
             
             # Убираем точку с запятой в конце (она не обязательна для выполнения)
@@ -334,10 +349,22 @@ class SQLQueryGenerator:
             if not text.upper().startswith("SELECT"):
                 raise Exception(f"Ответ не начинается с SELECT: {text[:50]}")
             
-            logger.info(f"Сгенерированный SQL: {text}")
+            logger.info(
+                "SQL запрос успешно сгенерирован",
+                sql_query=text[:500] if len(text) > 500 else text,
+                query_length=len(text),
+                normalized_query=normalized_query[:200]
+            )
             return text
             
         except Exception as e:
+            logger.exception(
+                "Ошибка при обращении к GigaChat API",
+                user_query=user_query[:200],
+                normalized_query=normalized_query[:200] if 'normalized_query' in locals() else None,
+                error=str(e),
+                error_type=type(e).__name__
+            )
             raise Exception(f"Ошибка при обращении к GigaChat API: {e}")
 
 

@@ -55,9 +55,80 @@ pip install -r requirements.txt
    - **GIGACHAT_SCOPE**: Область действия API (GIGACHAT_API_PERS для личного использования, GIGACHAT_API_B2B или GIGACHAT_API_CORP для бизнеса)
    - **DATABASE_URL**: URL базы данных PostgreSQL в формате `postgresql://user:password@host:port/dbname`
 
+   Полный список переменных окружения см. в файле `.env.example`.
+
 6. Убедитесь, что PostgreSQL установлен и запущен. Создайте базу данных:
 ```sql
 CREATE DATABASE video_analytics;
+```
+
+## Запуск с Docker
+
+Проект поддерживает запуск через Docker Compose, что упрощает развертывание и изолирует зависимости.
+
+### Предварительные требования
+
+- [Docker](https://www.docker.com/get-started) (версия 20.10+)
+- [Docker Compose](https://docs.docker.com/compose/install/) (версия 2.0+)
+
+### Быстрый старт
+
+1. Склонируйте репозиторий и перейдите в директорию проекта:
+```bash
+cd rlt
+```
+
+2. Создайте файл `.env` на основе `.env.example`:
+```bash
+cp .env.example .env
+```
+
+3. Отредактируйте `.env` и заполните необходимые переменные:
+```env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+GIGACHAT_CREDENTIALS=your_gigachat_credentials_here
+GIGACHAT_SCOPE=GIGACHAT_API_PERS
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=video_analytics
+```
+
+4. Запустите проект:
+```bash
+docker-compose up -d
+```
+
+Это запустит:
+- PostgreSQL базу данных на порту 5432
+- Telegram бота
+
+5. Примените SQL миграции (если нужно):
+```bash
+docker-compose exec bot python -c "from database import init_db; import os; from dotenv import load_dotenv; load_dotenv(); init_db(os.getenv('DATABASE_URL'))"
+```
+
+6. Загрузите данные в базу:
+```bash
+docker-compose exec bot python load_data.py <путь_к_json_файлу>
+```
+
+### Управление контейнерами
+
+- Просмотр логов: `docker-compose logs -f bot`
+- Остановка: `docker-compose down`
+- Перезапуск: `docker-compose restart bot`
+- Остановка с удалением данных: `docker-compose down -v`
+
+### Применение SQL миграций в Docker
+
+Миграции можно применить через SQLAlchemy (автоматически при первом запуске) или вручную:
+
+```bash
+# Через psql
+docker-compose exec postgres psql -U postgres -d video_analytics -f /path/to/migrations/001_initial_schema.sql
+
+# Или через Python (рекомендуется)
+docker-compose exec bot python -c "from database import init_db; import os; from dotenv import load_dotenv; load_dotenv(); init_db(os.getenv('DATABASE_URL'))"
 ```
 
 ## Подготовка данных
@@ -88,14 +159,28 @@ python bot.py
 
 2. Отправьте команду `/start` для начала работы
 
-3. Задавайте вопросы на русском языке, например:
+3. **Передача ссылки на репозиторий (команда `/check`):**
+   
+   Для передачи ссылки на публичный репозиторий используйте команду `/check`:
+   ```
+   /check https://github.com/username/repo
+   ```
+   
+   Поддерживаются репозитории:
+   - GitHub: `https://github.com/username/repo`
+   - GitLab: `https://gitlab.com/username/repo`
+   - Bitbucket: `https://bitbucket.org/username/repo`
+   
+   Бот валидирует формат ссылки и подтверждает получение.
+
+4. Задавайте вопросы на русском языке, например:
    - "Сколько всего видео есть в системе?"
    - "Сколько видео у креатора с id creator123 вышло с 1 ноября 2025 по 5 ноября 2025 включительно?"
    - "Сколько видео набрало больше 100 000 просмотров за всё время?" (поддерживаются пробелы в числах)
    - "На сколько просмотров в сумме выросли все видео 28 ноября 2025?"
    - "Сколько разных видео получали новые просмотры 27 ноября 2025?"
 
-4. Бот вернет ответ - одно число с результатом запроса (например: "42", "1000", "0")
+5. Бот вернет ответ - одно число с результатом запроса (например: "42", "1000", "0")
 
 ## Тестирование примеров из ТЗ
 
@@ -116,8 +201,14 @@ rlt/
 ├── load_data.py           # Скрипт для загрузки данных из JSON
 ├── query_generator.py     # Модуль генерации SQL из естественного языка
 ├── query_executor.py      # Модуль выполнения SQL запросов
-├── requirements.txt       # Зависимости проекта
-├── .env.example          # Пример файла с переменными окружения
+├── file_analyzer.py        # Модуль анализа загруженных JSON файлов
+├── requirements.txt        # Зависимости проекта
+├── .env.example           # Пример файла с переменными окружения
+├── Dockerfile             # Docker образ для бота
+├── docker-compose.yml     # Docker Compose конфигурация
+├── migrations/            # SQL миграции
+│   ├── 001_initial_schema.sql
+│   └── README.md
 └── README.md             # Этот файл
 ```
 
@@ -143,6 +234,129 @@ rlt/
 - `created_at` - время замера (раз в час)
 - `updated_at` - служебное поле
 
+## SQL Миграции
+
+Проект включает SQL миграции для создания схемы базы данных. Миграции находятся в директории `migrations/`.
+
+### Применение миграций
+
+**Способ 1: Автоматически через SQLAlchemy (рекомендуется)**
+
+При первом запуске бота или скрипта загрузки данных таблицы создаются автоматически через функцию `init_db()` из модуля `database.py`.
+
+**Способ 2: Вручную через psql**
+
+```bash
+psql -U your_user -d video_analytics -f migrations/001_initial_schema.sql
+```
+
+**Способ 3: Через Python**
+
+```python
+from database import init_db
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+db_url = os.getenv('DATABASE_URL')
+if db_url:
+    init_db(db_url)
+```
+
+Подробные инструкции по применению миграций см. в [migrations/README.md](migrations/README.md).
+
+## Архитектура и подход к преобразованию запросов
+
+### Общая архитектура
+
+Система состоит из следующих компонентов:
+
+1. **Telegram Bot** (`bot.py`) - принимает запросы пользователей и возвращает ответы
+2. **Query Generator** (`query_generator.py`) - преобразует естественный язык в SQL запросы с помощью LLM
+3. **Query Executor** (`query_executor.py`) - выполняет SQL запросы и возвращает результаты
+4. **Database Models** (`database.py`) - модели данных SQLAlchemy
+5. **File Analyzer** (`file_analyzer.py`) - анализ загруженных JSON файлов через GigaChat
+
+### Преобразование текстовых запросов в SQL
+
+Система использует **GigaChat API** (российский аналог ChatGPT) для преобразования вопросов на русском языке в SQL запросы.
+
+#### Описание схемы данных для LLM
+
+Схема базы данных описывается в переменной `DATABASE_SCHEMA` в файле `query_generator.py`:
+
+```python
+DATABASE_SCHEMA = """
+База данных содержит информацию о видео и их статистике.
+
+ТАБЛИЦА videos:
+- id (INTEGER, PRIMARY KEY) - уникальный идентификатор видео
+- creator_id (STRING) - идентификатор креатора
+- video_created_at (DATETIME) - дата и время публикации видео
+- views_count (BIGINT) - итоговое количество просмотров
+- likes_count (BIGINT) - итоговое количество лайков
+- comments_count (BIGINT) - итоговое количество комментариев
+- reports_count (BIGINT) - итоговое количество жалоб
+...
+
+ТАБЛИЦА video_snapshots:
+- id (INTEGER, PRIMARY KEY) - уникальный идентификатор снапшота
+- video_id (INTEGER, FOREIGN KEY -> videos.id) - ссылка на видео
+- delta_views_count (BIGINT) - приращение просмотров с прошлого замера
+...
+"""
+```
+
+#### Промпт для генерации SQL
+
+Системный промпт (`SYSTEM_PROMPT` в `query_generator.py`) содержит:
+
+1. **Описание задачи**: преобразование вопроса на русском языке в SQL запрос для PostgreSQL
+2. **Описание схемы БД**: полное описание таблиц и их полей
+3. **Правила безопасности**: разрешены только SELECT запросы, запрещены DROP, DELETE, UPDATE и т.д.
+4. **Правила форматирования**: запрос должен возвращать одно число, без дополнительного текста
+5. **Обработка дат**: инструкции по преобразованию русских дат в SQL формат
+6. **Примеры**: множество примеров вопросов и соответствующих SQL запросов
+
+Пример промпта:
+```
+Ты - эксперт по SQL запросам для PostgreSQL. Твоя задача - преобразовать вопрос на русском языке в корректный SQL запрос.
+
+[Схема БД]
+
+КРИТИЧЕСКИ ВАЖНО:
+1. Возвращай ТОЛЬКО SQL запрос, БЕЗ ЛЮБЫХ объяснений
+2. Используй ТОЛЬКО SELECT запросы
+3. Запрос ДОЛЖЕН возвращать одно число
+
+[Примеры вопросов и SQL]
+```
+
+#### Процесс преобразования
+
+1. **Нормализация запроса**: удаление лишних пробелов, нормализация чисел (100 000 → 100000)
+2. **Генерация SQL**: отправка промпта с нормализованным вопросом в GigaChat API
+3. **Очистка ответа**: удаление markdown форматирования, комментариев, лишнего текста
+4. **Валидация**: проверка безопасности SQL (только SELECT, запрет опасных операций)
+5. **Выполнение**: выполнение запроса через asyncpg и возврат результата
+
+#### Безопасность
+
+Все SQL запросы проходят валидацию перед выполнением:
+- Разрешены только SELECT запросы
+- Запрещены: DROP, DELETE, UPDATE, INSERT, ALTER, CREATE, TRUNCATE и т.д.
+- Проверка выполняется в методе `_validate_sql()` класса `VideoAnalytics`
+
+### Публичный репозиторий
+
+Для передачи ссылки на публичный репозиторий используется команда `/check`:
+
+```
+/check https://github.com/username/repo
+```
+
+Бот валидирует формат ссылки (поддерживаются GitHub, GitLab, Bitbucket) и сохраняет её для дальнейшей проверки проекта.
+
 ## Технологии
 
 - **Python 3.11+**
@@ -151,6 +365,8 @@ rlt/
 - **PostgreSQL** - база данных
 - **asyncpg** - асинхронный драйвер для PostgreSQL
 - **GigaChat API** - для генерации SQL запросов из естественного языка (работает в России без VPN)
+- **Docker** - контейнеризация приложения
+- **Docker Compose** - оркестрация контейнеров
 
 ## Устранение проблем
 

@@ -6,14 +6,13 @@ import asyncio
 import os
 import re
 import sys
-from typing import Dict, List, Tuple, Optional
+from typing import Dict
 from dotenv import load_dotenv
 from sqlalchemy import inspect, text
-from sqlalchemy.exc import SQLAlchemyError
 
-from database import get_engine, Video, VideoSnapshot
+from database import init_db
 from query_executor import VideoAnalytics
-from query_generator import QueryGenerator
+from query_generator import SQLQueryGenerator
 
 load_dotenv()
 
@@ -23,7 +22,8 @@ class RequirementsChecker:
     
     def __init__(self):
         self.db_url = os.getenv("DATABASE_URL")
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.gigachat_credentials = os.getenv("GIGACHAT_CREDENTIALS")
+        self.gigachat_scope = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
         self.results = {}
         self.errors = []
         
@@ -42,7 +42,7 @@ class RequirementsChecker:
                 checks["db_url_configured"] = False
                 return checks
             
-            engine = get_engine(self.db_url)
+            engine = init_db(self.db_url)
             inspector = inspect(engine)
             
             # Проверка таблицы videos
@@ -161,7 +161,7 @@ class RequirementsChecker:
         checks = {}
         
         try:
-            engine = get_engine(self.db_url)
+            engine = init_db(self.db_url)
             
             # Проверка количества записей
             with engine.connect() as conn:
@@ -249,7 +249,7 @@ class RequirementsChecker:
         
         try:
             import asyncpg
-            print(f"✅ asyncpg установлен")
+            print("✅ asyncpg установлен")
             checks["asyncpg"] = True
         except ImportError:
             print("❌ asyncpg не установлен")
@@ -257,19 +257,19 @@ class RequirementsChecker:
         
         try:
             import psycopg2
-            print(f"✅ psycopg2 установлен")
+            print("✅ psycopg2 установлен")
             checks["psycopg2"] = True
         except ImportError:
             print("❌ psycopg2 не установлен")
             checks["psycopg2"] = False
         
         try:
-            import openai
-            print(f"✅ OpenAI API установлен")
-            checks["openai"] = True
+            import gigachat
+            print("✅ GigaChat API установлен")
+            checks["gigachat"] = True
         except ImportError:
-            print("❌ OpenAI API не установлен")
-            checks["openai"] = False
+            print("❌ GigaChat API не установлен")
+            checks["gigachat"] = False
         
         return checks
     
@@ -290,12 +290,12 @@ class RequirementsChecker:
             print("❌ TELEGRAM_BOT_TOKEN не настроен")
             checks["bot_token"] = False
         
-        if self.openai_api_key:
-            print("✅ OPENAI_API_KEY настроен")
-            checks["openai_key"] = True
+        if self.gigachat_credentials:
+            print("✅ GIGACHAT_CREDENTIALS настроен")
+            checks["gigachat_credentials"] = True
         else:
-            print("❌ OPENAI_API_KEY не настроен")
-            checks["openai_key"] = False
+            print("❌ GIGACHAT_CREDENTIALS не настроен")
+            checks["gigachat_credentials"] = False
         
         if self.db_url:
             print("✅ DATABASE_URL настроен")
@@ -339,7 +339,7 @@ class RequirementsChecker:
         
         return checks
     
-    def check_5_nlp_recognition(self) -> Dict[str, bool]:
+    async def check_5_nlp_recognition(self) -> Dict[str, bool]:
         """Проверка распознавания естественного языка."""
         print("\n" + "="*60)
         print("5. ПРОВЕРКА РАСПОЗНАВАНИЯ ЕСТЕСТВЕННОГО ЯЗЫКА")
@@ -348,19 +348,15 @@ class RequirementsChecker:
         checks = {}
         
         try:
-            generator = QueryGenerator(api_key=self.openai_api_key)
+            generator = SQLQueryGenerator(credentials=self.gigachat_credentials, scope=self.gigachat_scope)
             
             # Проверка наличия промпта
-            if hasattr(generator, 'SCHEMA_DESCRIPTION'):
-                schema = generator.SCHEMA_DESCRIPTION
-                if 'videos' in schema and 'video_snapshots' in schema:
-                    print("✅ Промпт содержит описание схемы БД")
-                    checks["schema_description"] = True
-                else:
-                    print("⚠️  Промпт не содержит полного описания схемы")
-                    checks["schema_description"] = False
+            from query_generator import DATABASE_SCHEMA
+            if DATABASE_SCHEMA and 'videos' in DATABASE_SCHEMA and 'video_snapshots' in DATABASE_SCHEMA:
+                print("✅ Промпт содержит описание схемы БД")
+                checks["schema_description"] = True
             else:
-                print("❌ SCHEMA_DESCRIPTION отсутствует")
+                print("⚠️  Промпт не содержит полного описания схемы")
                 checks["schema_description"] = False
             
             # Проверка валидации SQL
@@ -407,7 +403,7 @@ class RequirementsChecker:
             sql_generation_works = True
             for query in test_queries:
                 try:
-                    sql = generator.generate_sql(query)
+                    sql = await generator.generate_sql(query)
                     if sql and 'SELECT' in sql.upper():
                         print(f"  ✅ SQL сгенерирован для: '{query[:30]}...'")
                         print(f"     SQL: {sql[:100]}...")
@@ -445,13 +441,13 @@ class RequirementsChecker:
         
         checks = {}
         
-        if not self.openai_api_key or not self.db_url:
-            print("⚠️  Пропущено: требуется OPENAI_API_KEY и DATABASE_URL")
+        if not self.gigachat_credentials or not self.db_url:
+            print("⚠️  Пропущено: требуется GIGACHAT_CREDENTIALS и DATABASE_URL")
             print("   Создайте файл .env: python setup_env.py")
             return checks
         
-        analytics = VideoAnalytics(db_url=self.db_url, openai_api_key=self.openai_api_key)
-        generator = QueryGenerator(api_key=self.openai_api_key)
+        analytics = VideoAnalytics(db_url=self.db_url, gigachat_credentials=self.gigachat_credentials, gigachat_scope=self.gigachat_scope)
+        generator = SQLQueryGenerator(credentials=self.gigachat_credentials, scope=self.gigachat_scope)
         
         test_cases = [
             {
@@ -487,7 +483,7 @@ class RequirementsChecker:
                 
                 # Проверка генерации SQL
                 try:
-                    sql = generator.generate_sql(test_case['query'])
+                    sql = await generator.generate_sql(test_case['query'])
                     print(f"Сгенерированный SQL: {sql}")
                     
                     # Проверка паттерна
@@ -713,7 +709,7 @@ async def main():
     checker.results["2_data_loading"] = checker.check_2_data_loading()
     checker.results["3_technologies"] = checker.check_3_technologies()
     checker.results["4_telegram_bot"] = checker.check_4_telegram_bot()
-    checker.results["5_nlp"] = checker.check_5_nlp_recognition()
+    checker.results["5_nlp"] = await checker.check_5_nlp_recognition()
     checker.results["6_examples"] = await checker.check_6_example_queries()
     checker.results["7_format"] = checker.check_7_answer_format()
     checker.results["8_context"] = checker.check_8_no_context()

@@ -2,13 +2,20 @@
 Модуль для анализа загруженных JSON файлов и ответов на вопросы через GigaChat.
 """
 import json
-import logging
 import asyncio
 import re
-from typing import Optional, Dict, Any, List
+import os
+import hashlib
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Dict, Any
+from loguru import logger
 from gigachat import GigaChat
 
-logger = logging.getLogger(__name__)
+# Путь к папке кэша
+CACHE_DIR = Path(__file__).parent / "cache"
+CACHE_METADATA_FILE = CACHE_DIR / "metadata.json"
 
 
 class FileAnalyzer:
@@ -26,6 +33,19 @@ class FileAnalyzer:
         self.scope = gigachat_scope
         self._client = None
         self.current_data: Optional[Dict[str, Any]] = None
+        self.cached_file_path: Optional[str] = None
+        self.cached_file_name: Optional[str] = None
+        
+        # Создаем папку кэша, если её нет
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(
+                "Не удалось создать папку кэша",
+                cache_dir=str(CACHE_DIR),
+                error=str(e),
+                error_type=type(e).__name__
+            )
     
     def _get_client(self) -> GigaChat:
         """Получает или создает клиент GigaChat."""
@@ -37,12 +57,162 @@ class FileAnalyzer:
             )
         return self._client
     
-    def load_json_file(self, file_path: str) -> Dict[str, Any]:
+    def _calculate_file_hash(self, file_path: str) -> str:
+        """
+        Вычисляет хеш файла для проверки изменений.
+        
+        Args:
+            file_path: Путь к файлу
+            
+        Returns:
+            SHA256 хеш файла
+        """
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+    
+    def _save_to_cache(self, source_file_path: str, file_name: str) -> str:
+        """
+        Сохраняет файл в кэш и обновляет метаданные.
+        
+        Args:
+            source_file_path: Путь к исходному файлу
+            file_name: Имя файла для сохранения
+            
+        Returns:
+            Путь к сохраненному файлу в кэше
+            
+        Raises:
+            Exception: Если не удалось сохранить файл в кэш
+        """
+        try:
+            # Убеждаемся, что папка кэша существует
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # Вычисляем хеш файла
+            file_hash = self._calculate_file_hash(source_file_path)
+            
+            # Очищаем имя файла от недопустимых символов
+            safe_file_name = "".join(
+                c for c in file_name if c.isalnum() or c in "._-"
+            ) or "file.json"
+            
+            # Создаем имя файла в кэше на основе хеша
+            cache_file_name = f"{file_hash[:16]}_{safe_file_name}"
+            cache_file_path = CACHE_DIR / cache_file_name
+            
+            # Копируем файл в кэш
+            shutil.copy2(source_file_path, cache_file_path)
+            
+            # Сохраняем метаданные
+            metadata = {
+                'file_name': file_name,
+                'cache_file_name': cache_file_name,
+                'file_hash': file_hash,
+                'cached_at': datetime.now().isoformat(),
+                'file_path': str(cache_file_path)
+            }
+            
+            with open(CACHE_METADATA_FILE, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
+            
+            logger.info(
+                "Файл сохранен в кэш",
+                cache_file=str(cache_file_path),
+                source_file=source_file_path,
+                file_name=file_name,
+                file_hash=file_hash[:16]
+            )
+            return str(cache_file_path)
+        except Exception as e:
+            logger.exception(
+                "Ошибка при сохранении в кэш",
+                source_file=source_file_path,
+                file_name=file_name,
+                cache_dir=str(CACHE_DIR),
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            raise Exception(f"Не удалось сохранить файл в кэш: {e}")
+    
+    def _load_from_cache(self) -> Optional[str]:
+        """
+        Загружает файл из кэша, если он существует.
+        
+        Returns:
+            Путь к файлу в кэше или None, если кэш пуст
+        """
+        if not CACHE_METADATA_FILE.exists():
+            return None
+        
+        try:
+            with open(CACHE_METADATA_FILE, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+            
+            cache_file_path = metadata.get('file_path')
+            if cache_file_path and os.path.exists(cache_file_path):
+                self.cached_file_name = metadata.get('file_name', 'cached_file.json')
+                logger.info(
+                    "Загружен файл из кэша",
+                    cache_file=cache_file_path,
+                    file_name=self.cached_file_name,
+                    cached_at=metadata.get('cached_at')
+                )
+                return cache_file_path
+            else:
+                logger.warning(
+                    "Файл в кэше не найден, очищаю метаданные",
+                    expected_file=cache_file_path
+                )
+                self._clear_cache()
+                return None
+        except Exception as e:
+            logger.warning(
+                "Ошибка при загрузке из кэша",
+                metadata_file=str(CACHE_METADATA_FILE),
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return None
+    
+    def _clear_cache(self):
+        """Очищает кэш и метаданные."""
+        if CACHE_METADATA_FILE.exists():
+            try:
+                metadata = json.load(open(CACHE_METADATA_FILE, 'r', encoding='utf-8'))
+                cache_file_path = metadata.get('file_path')
+                if cache_file_path and os.path.exists(cache_file_path):
+                    os.unlink(cache_file_path)
+            except Exception as e:
+                logger.warning(
+                    "Ошибка при удалении файла из кэша",
+                    cache_file=cache_file_path,
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+            
+            try:
+                os.unlink(CACHE_METADATA_FILE)
+            except Exception as e:
+                logger.warning(
+                    "Ошибка при удалении метаданных",
+                    metadata_file=str(CACHE_METADATA_FILE),
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+        
+        self.cached_file_path = None
+        self.cached_file_name = None
+    
+    def load_json_file(self, file_path: str, cache: bool = True) -> Dict[str, Any]:
         """
         Загружает JSON файл.
         
         Args:
             file_path: Путь к JSON файлу
+            cache: Сохранять ли файл в кэш (по умолчанию True)
             
         Returns:
             Словарь с данными из файла
@@ -51,34 +221,57 @@ class FileAnalyzer:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             self.current_data = data
-            logger.info(f"Файл {file_path} успешно загружен")
+            
+            # Сохраняем в кэш, если указано
+            if cache:
+                try:
+                    file_name = os.path.basename(file_path)
+                    self.cached_file_path = self._save_to_cache(file_path, file_name)
+                    self.cached_file_name = file_name
+                    logger.info(
+                        "Файл сохранен в кэш",
+                        cache_file=self.cached_file_path,
+                        source_file=file_path
+                    )
+                except Exception as cache_error:
+                    # Если не удалось сохранить в кэш, продолжаем без кэширования
+                    logger.warning(
+                        "Не удалось сохранить файл в кэш, файл загружен без кэширования",
+                        file_path=file_path,
+                        error=str(cache_error),
+                        error_type=type(cache_error).__name__
+                    )
+            
+            logger.info(
+                "Файл успешно загружен",
+                file_path=file_path,
+                cached=(self.cached_file_path is not None),
+                file_size=os.path.getsize(file_path) if os.path.exists(file_path) else None
+            )
             return data
         except json.JSONDecodeError as e:
+            logger.error(
+                "Ошибка парсинга JSON",
+                file_path=file_path,
+                error=str(e),
+                error_line=getattr(e, 'lineno', None),
+                error_column=getattr(e, 'colno', None)
+            )
             raise ValueError(f"Ошибка парсинга JSON: {e}")
         except FileNotFoundError:
+            logger.error(
+                "Файл не найден",
+                file_path=file_path
+            )
             raise FileNotFoundError(f"Файл {file_path} не найден")
         except Exception as e:
+            logger.exception(
+                "Ошибка при загрузке файла",
+                file_path=file_path,
+                error=str(e),
+                error_type=type(e).__name__
+            )
             raise Exception(f"Ошибка при загрузке файла: {e}")
-    
-    def load_json_from_bytes(self, file_bytes: bytes) -> Dict[str, Any]:
-        """
-        Загружает JSON из байтов.
-        
-        Args:
-            file_bytes: Байты JSON файла
-            
-        Returns:
-            Словарь с данными из файла
-        """
-        try:
-            data = json.loads(file_bytes.decode('utf-8'))
-            self.current_data = data
-            logger.info("JSON данные успешно загружены из байтов")
-            return data
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Ошибка парсинга JSON: {e}")
-        except Exception as e:
-            raise Exception(f"Ошибка при загрузке JSON: {e}")
     
     def _summarize_data(self, data: Dict[str, Any]) -> str:
         """
@@ -243,7 +436,12 @@ class FileAnalyzer:
         
         # Если данные слишком большие, создаем сводку
         if len(json_str) > max_size:
-            logger.info(f"Данные слишком большие ({len(json_str)} символов), создаю сводку")
+            logger.info(
+                "Данные слишком большие, создаю сводку",
+                data_size=len(json_str),
+                max_size=max_size,
+                reduction_percent=round((1 - max_size / len(json_str)) * 100, 1)
+            )
             summary = self._summarize_data(data)
             
             # Добавляем примеры данных
@@ -358,15 +556,32 @@ class FileAnalyzer:
                 if not text:
                     raise Exception(f"Неожиданный формат ответа от GigaChat: {type(response)}")
             
-            logger.info(f"Ответ от GigaChat получен: {text[:100]}...")
+            logger.info(
+                "Ответ от GigaChat получен",
+                question=question[:100] + "..." if len(question) > 100 else question,
+                response_preview=text[:100] + "..." if len(text) > 100 else text,
+                response_length=len(text)
+            )
             
             # Извлекаем число из ответа
             number = self._extract_number(text)
             
+            logger.debug(
+                "Число извлечено из ответа",
+                extracted_number=number,
+                original_response=text[:200]
+            )
+            
             return number
             
         except Exception as e:
-            logger.error(f"Ошибка при обработке вопроса: {e}", exc_info=True)
+            logger.exception(
+                "Ошибка при обработке вопроса",
+                question=question[:200] if len(question) > 200 else question,
+                has_data=(self.current_data is not None),
+                error=str(e),
+                error_type=type(e).__name__
+            )
             raise Exception(f"Ошибка при обработке вопроса: {e}")
     
     def has_data(self) -> bool:
@@ -374,7 +589,63 @@ class FileAnalyzer:
         return self.current_data is not None
     
     def clear_data(self):
-        """Очищает загруженные данные."""
+        """Очищает загруженные данные и кэш."""
         self.current_data = None
-        logger.info("Данные очищены")
+        self._clear_cache()
+        logger.info(
+            "Данные и кэш очищены",
+            had_cached_file=(self.cached_file_path is not None),
+            cached_file_name=self.cached_file_name
+        )
+    
+    def load_cached_file(self) -> bool:
+        """
+        Загружает файл из кэша, если он существует.
+        
+        Returns:
+            True если файл был загружен, False иначе
+        """
+        cache_file_path = self._load_from_cache()
+        if cache_file_path:
+            try:
+                self.load_json_file(cache_file_path, cache=False)
+                self.cached_file_path = cache_file_path
+                return True
+            except Exception as e:
+                logger.exception(
+                    "Ошибка при загрузке файла из кэша",
+                    cache_file_path=cache_file_path,
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+                self._clear_cache()
+                return False
+        return False
+    
+    def get_cached_file_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Возвращает информацию о закэшированном файле.
+        
+        Returns:
+            Словарь с информацией о файле или None
+        """
+        if not CACHE_METADATA_FILE.exists():
+            return None
+        
+        try:
+            with open(CACHE_METADATA_FILE, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+            
+            cache_file_path = metadata.get('file_path')
+            if cache_file_path and os.path.exists(cache_file_path):
+                return metadata
+            return None
+        except Exception as e:
+            logger.warning(
+                "Ошибка при чтении метаданных",
+                metadata_file=str(CACHE_METADATA_FILE),
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return None
 

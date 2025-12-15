@@ -5,7 +5,7 @@
 import os
 from dotenv import load_dotenv
 from sqlalchemy import inspect, text
-from database import get_engine
+from database import init_db
 
 load_dotenv()
 
@@ -37,7 +37,7 @@ def check_database_structure():
     print("="*70)
     
     try:
-        engine = get_engine(db_url)
+        engine = init_db(db_url)
         inspector = inspect(engine)
         
         # Получаем список таблиц

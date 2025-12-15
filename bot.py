@@ -5,10 +5,12 @@ Telegram бот для аналитики видео.
 """
 import os
 import asyncio
-import logging
 import tempfile
+import sys
+from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
+from loguru import logger
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message, BotCommand
@@ -18,12 +20,37 @@ from file_analyzer import FileAnalyzer
 # Загружаем переменные окружения
 load_dotenv()
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Настройка логирования loguru
+# Удаляем стандартный обработчик
+logger.remove()
+
+# Добавляем обработчик для консоли с цветным выводом
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+           "<level>{level: <8}</level> | "
+           "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+           "<level>{message}</level>",
+    level="INFO",
+    colorize=True
 )
-logger = logging.getLogger(__name__)
+
+# Добавляем обработчик для файла с подробной информацией
+logs_dir = Path(__file__).parent / "logs"
+logs_dir.mkdir(exist_ok=True)
+log_file = logs_dir / "bot_{time:YYYY-MM-DD}.log"
+
+logger.add(
+    log_file,
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}",
+    level="DEBUG",
+    rotation="00:00",  # Ротация в полночь
+    retention="30 days",  # Хранить логи 30 дней
+    compression="zip",  # Сжимать старые логи
+    encoding="utf-8",
+    backtrace=True,  # Показывать полный стек вызовов
+    diagnose=True,  # Показывать значения переменных при ошибках
+)
 
 # Инициализация бота и диспетчера
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -50,6 +77,7 @@ async def set_bot_commands():
     commands = [
         BotCommand(command="start", description="Начать работу с ботом"),
         BotCommand(command="clear_file", description="Очистить загруженный файл"),
+        BotCommand(command="check", description="Передать ссылку на репозиторий"),
         BotCommand(
             command="total_videos",
             description="Сколько всего видео в системе?"
@@ -103,13 +131,93 @@ async def cmd_clear_file(message: Message):
     global file_analyzer
     
     if file_analyzer and file_analyzer.has_data():
+        cached_info = file_analyzer.get_cached_file_info()
+        file_name = cached_info.get('file_name', 'файл') if cached_info else 'файл'
+        
         file_analyzer.clear_data()
         await message.answer(
-            "✅ Загруженный файл очищен. "
+            f"✅ Загруженный файл '{file_name}' очищен из памяти и кэша. "
             "Теперь бот будет использовать данные из базы данных."
         )
     else:
         await message.answer("ℹ️ Нет загруженного файла для очистки.")
+
+
+@dp.message(Command("check"))
+async def cmd_check(message: Message):
+    """Обработчик команды /check - принимает ссылку на репозиторий."""
+    import re
+    
+    # Извлекаем текст после команды /check
+    text = message.text or ""
+    # Убираем команду /check и лишние пробелы
+    url_text = text.replace("/check", "").strip()
+    
+    # Если URL не указан, просим его предоставить
+    if not url_text:
+        await message.answer(
+            "📋 Пожалуйста, укажите ссылку на репозиторий после команды /check.\n\n"
+            "Примеры:\n"
+            "• /check https://github.com/username/repo\n"
+            "• /check https://gitlab.com/username/repo\n"
+            "• /check https://bitbucket.org/username/repo"
+        )
+        return
+    
+    # Валидируем URL репозитория
+    # Поддерживаемые форматы:
+    # - https://github.com/username/repo
+    # - https://gitlab.com/username/repo
+    # - https://bitbucket.org/username/repo
+    # - http:// варианты тоже поддерживаем
+    
+    url_patterns = [
+        r'https?://github\.com/[\w\-\.]+/[\w\-\.]+',
+        r'https?://gitlab\.com/[\w\-\.]+/[\w\-\.]+',
+        r'https?://bitbucket\.org/[\w\-\.]+/[\w\-\.]+',
+    ]
+    
+    is_valid = False
+    for pattern in url_patterns:
+        if re.match(pattern, url_text):
+            is_valid = True
+            break
+    
+    if not is_valid:
+        await message.answer(
+            "❌ Неверный формат ссылки на репозиторий.\n\n"
+            "Поддерживаются репозитории:\n"
+            "• GitHub: https://github.com/username/repo\n"
+            "• GitLab: https://gitlab.com/username/repo\n"
+            "• Bitbucket: https://bitbucket.org/username/repo\n\n"
+            "Пожалуйста, проверьте ссылку и попробуйте снова."
+        )
+        return
+    
+    # Логируем полученную ссылку
+    logger.info(
+        "Получена ссылка на репозиторий",
+        repository_url=url_text,
+        user_id=message.from_user.id if message.from_user else None,
+        username=message.from_user.username if message.from_user else None
+    )
+    
+    # Определяем тип репозитория
+    repo_type = "неизвестный"
+    if "github.com" in url_text:
+        repo_type = "GitHub"
+    elif "gitlab.com" in url_text:
+        repo_type = "GitLab"
+    elif "bitbucket.org" in url_text:
+        repo_type = "Bitbucket"
+    
+    # Отвечаем пользователю
+    await message.answer(
+        f"✅ Ссылка на репозиторий получена!\n\n"
+        f"🔗 Репозиторий: {url_text}\n"
+        f"📦 Платформа: {repo_type}\n\n"
+        f"Ссылка сохранена и будет использована для проверки проекта."
+    )
 
 
 @dp.message(Command("total_videos"))
@@ -175,9 +283,10 @@ async def handle_message_with_query(message: Message, query: str):
             
         except Exception as e:
             logger.error(
-                f"Ошибка при обработке запроса через file_analyzer "
-                f"'{query}': {e}",
-                exc_info=True
+                "Ошибка при обработке запроса через file_analyzer",
+                query=query,
+                error=str(e),
+                error_type=type(e).__name__
             )
             
             try:
@@ -228,8 +337,11 @@ async def handle_message_with_query(message: Message, query: str):
         
     except Exception as e:
         logger.error(
-            f"Ошибка при обработке запроса '{query}': {e}",
-            exc_info=True
+            "Ошибка при обработке запроса",
+            query=query,
+            error=str(e),
+            error_type=type(e).__name__,
+            user_id=message.from_user.id if message.from_user else None
         )
         
         # Удаляем сообщение "Обрабатываю запрос..."
@@ -287,24 +399,66 @@ async def handle_document(message: Message):
         )
         return
     
+    # Проверяем размер файла (максимум 50 МБ)
+    max_file_size = 50 * 1024 * 1024  # 50 МБ
+    if document.file_size and document.file_size > max_file_size:
+        await message.answer(
+            f"❌ Файл слишком большой ({document.file_size / 1024 / 1024:.1f} МБ). "
+            f"Максимальный размер: {max_file_size / 1024 / 1024} МБ."
+        )
+        return
+    
     # Показываем, что бот обрабатывает файл
     processing_msg = await message.answer("📥 Загружаю и анализирую файл...")
     
     tmp_path = None
     try:
-        # Скачиваем файл
+        # Скачиваем файл с таймаутом
         file = await bot.get_file(document.file_id)
         
         # Создаем временный файл
         with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.json') as tmp_file:
             tmp_path = tmp_file.name
-            await bot.download_file(file.file_path, tmp_path)
+        
+        # Загружаем файл с таймаутом и обработкой ошибок
+        try:
+            # Таймаут для загрузки: 5 минут для больших файлов
+            download_timeout = 300  # 5 минут
+            await asyncio.wait_for(
+                bot.download_file(file.file_path, tmp_path),
+                timeout=download_timeout
+            )
+        except asyncio.TimeoutError:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+            try:
+                await processing_msg.delete()
+            except Exception:
+                pass
+            await message.answer(
+                f"❌ Превышено время ожидания при загрузке файла.\n\n"
+                f"Файл '{document.file_name}' слишком большой или соединение нестабильно.\n\n"
+                f"Попробуйте:\n"
+                "• Отправить файл меньшего размера\n"
+                "• Проверить интернет-соединение\n"
+                "• Попробовать позже"
+            )
+            logger.warning(
+                "Таймаут при загрузке файла",
+                file_name=document.file_name,
+                file_size=document.file_size,
+                user_id=message.from_user.id if message.from_user else None
+            )
+            return
         
         try:
-            # Загружаем JSON
-            file_analyzer.load_json_file(tmp_path)
+            # Загружаем JSON и сохраняем в кэш
+            file_analyzer.load_json_file(tmp_path, cache=True)
             
-            # Удаляем временный файл
+            # Удаляем временный файл (файл уже сохранен в кэш)
             os.unlink(tmp_path)
             tmp_path = None
             
@@ -314,9 +468,17 @@ async def handle_document(message: Message):
             except Exception:
                 pass
             
+            cached_info = file_analyzer.get_cached_file_info()
+            cache_note = ""
+            if cached_info:
+                cache_note = (
+                    "\n\n💾 Файл сохранен в кэш и будет автоматически "
+                    "загружаться при следующем запуске бота."
+                )
+            
             await message.answer(
                 f"✅ Файл '{document.file_name}' успешно загружен "
-                f"и проанализирован!\n\n"
+                f"и проанализирован!{cache_note}\n\n"
                 "Теперь вы можете задавать вопросы на основе данных "
                 "из этого файла.\n\n"
                 "Примеры вопросов:\n"
@@ -328,7 +490,7 @@ async def handle_document(message: Message):
                 "данных из базы."
             )
             
-        except ValueError as e:
+        except ValueError as json_error:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             try:
@@ -336,34 +498,95 @@ async def handle_document(message: Message):
             except Exception:
                 pass
             await message.answer(
-                f"❌ Ошибка при обработке JSON файла: {str(e)}\n\n"
+                f"❌ Ошибка при обработке JSON файла: {str(json_error)}\n\n"
                 "Убедитесь, что файл содержит корректный JSON."
             )
-        except Exception as e:
+        except Exception as inner_error:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             try:
                 await processing_msg.delete()
-            except Exception:
-                pass
-            raise
+            except Exception as delete_error:
+                logger.debug(
+                    "Не удалось удалить сообщение",
+                    error=str(delete_error)
+                )
+            raise inner_error
             
     except Exception as e:
-        logger.error(f"Ошибка при загрузке файла: {e}", exc_info=True)
+        logger.exception(
+            "Ошибка при загрузке файла",
+            file_name=document.file_name if document else None,
+            file_size=document.file_size if document else None,
+            user_id=message.from_user.id if message.from_user else None,
+            error=str(e),
+            error_type=type(e).__name__
+        )
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
-            except Exception:
-                pass
+            except Exception as cleanup_error:
+                logger.debug(
+                    "Не удалось удалить временный файл",
+                    file_path=tmp_path,
+                    error=str(cleanup_error)
+                )
         try:
             await processing_msg.delete()
-        except Exception:
-            pass
-        await message.answer(
-            f"❌ Произошла ошибка при загрузке файла: {str(e)}\n\n"
-            "Попробуйте отправить файл еще раз или обратитесь "
-            "к администратору."
-        )
+        except Exception as delete_error:
+            logger.debug(
+                "Не удалось удалить сообщение",
+                error=str(delete_error)
+            )
+        
+        # Формируем более информативное сообщение об ошибке
+        error_message = str(e)
+        error_type = type(e).__name__
+        
+        # Специальная обработка для таймаута
+        if isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in error_message.lower():
+            user_message = (
+                f"⏱️ Превышено время ожидания при загрузке файла.\n\n"
+                f"Файл '{document.file_name if document else 'файл'}' слишком большой "
+                f"или соединение нестабильно.\n\n"
+                f"Попробуйте:\n"
+                f"• Отправить файл меньшего размера (рекомендуется до 10 МБ)\n"
+                f"• Проверить интернет-соединение\n"
+                f"• Попробовать позже"
+            )
+        elif "JSON" in error_message or "json" in error_message.lower():
+            user_message = (
+                f"❌ Ошибка при обработке JSON файла: {error_message}\n\n"
+                "Убедитесь, что файл содержит корректный JSON формат."
+            )
+        elif "кэш" in error_message.lower() or "cache" in error_message.lower():
+            user_message = (
+                f"⚠️ Файл загружен, но не удалось сохранить в кэш: {error_message}\n\n"
+                "Файл будет работать до перезапуска бота. "
+                "Попробуйте отправить файл еще раз."
+            )
+        elif "connection" in error_message.lower() or "соединен" in error_message.lower():
+            user_message = (
+                "🌐 Ошибка соединения при загрузке файла.\n\n"
+                "Проверьте интернет-соединение и попробуйте отправить файл еще раз."
+            )
+        elif "permission" in error_message.lower() or "доступ" in error_message.lower():
+            user_message = (
+                "🔒 Ошибка доступа при сохранении файла.\n\n"
+                "Пожалуйста, обратитесь к администратору."
+            )
+        else:
+            user_message = (
+                f"❌ Произошла ошибка при загрузке файла.\n\n"
+                f"Тип ошибки: {error_type}\n"
+                f"Сообщение: {error_message[:200]}\n\n"
+                f"Попробуйте:\n"
+                f"• Отправить файл еще раз\n"
+                f"• Проверить формат файла (должен быть JSON)\n"
+                f"• Обратиться к администратору"
+            )
+        
+        await message.answer(user_message)
 
 
 @dp.message()
@@ -402,9 +625,11 @@ async def handle_message(message: Message):
             
         except Exception as e:
             logger.error(
-                f"Ошибка при обработке запроса через file_analyzer "
-                f"'{user_query}': {e}",
-                exc_info=True
+                "Ошибка при обработке запроса через file_analyzer",
+                query=user_query,
+                error=str(e),
+                error_type=type(e).__name__,
+                user_id=message.from_user.id if message.from_user else None
             )
             
             try:
@@ -455,8 +680,11 @@ async def handle_message(message: Message):
         
     except Exception as e:
         logger.error(
-            f"Ошибка при обработке запроса '{user_query}': {e}",
-            exc_info=True
+            "Ошибка при обработке запроса",
+            query=user_query,
+            error=str(e),
+            error_type=type(e).__name__,
+            user_id=message.from_user.id if message.from_user else None
         )
         
         # Удаляем сообщение "Обрабатываю запрос..."
@@ -509,6 +737,20 @@ async def main():
                 gigachat_credentials=GIGACHAT_CREDENTIALS,
                 gigachat_scope=GIGACHAT_SCOPE
             )
+            
+            # Пытаемся загрузить файл из кэша
+            if file_analyzer.load_cached_file():
+                cached_info = file_analyzer.get_cached_file_info()
+                if cached_info:
+                    logger.info(
+                        f"Загружен файл из кэша: {cached_info.get('file_name', 'unknown')} "
+                        f"(закэширован {cached_info.get('cached_at', 'unknown')})"
+                    )
+                else:
+                    logger.info("Файл загружен из кэша")
+            else:
+                logger.info("Кэш пуст, файл не загружен")
+            
             logger.info("Анализатор файлов инициализирован")
         else:
             logger.warning(
@@ -527,7 +769,11 @@ async def main():
         await dp.start_polling(bot)
         
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+        logger.exception(
+            "Критическая ошибка при работе бота",
+            error=str(e),
+            error_type=type(e).__name__
+        )
         raise
     finally:
         # Закрываем соединения
@@ -542,4 +788,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
     except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
+        logger.exception(
+            "Ошибка при запуске бота",
+            error=str(e),
+            error_type=type(e).__name__
+        )
