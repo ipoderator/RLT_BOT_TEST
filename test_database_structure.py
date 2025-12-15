@@ -12,9 +12,9 @@ load_dotenv()
 
 def check_database_structure():
     """Проверяет структуру базы данных."""
-    
+
     db_url = os.getenv("DATABASE_URL")
-    
+
     if not db_url:
         print("="*70)
         print("⚠️  DATABASE_URL не найден")
@@ -31,32 +31,32 @@ def check_database_structure():
         print("   Пример: postgresql://postgres:password@localhost:5432/video_analytics")
         print("\n" + "="*70)
         return False
-    
+
     print("="*70)
     print("ПРОВЕРКА СТРУКТУРЫ БАЗЫ ДАННЫХ")
     print("="*70)
-    
+
     try:
         engine = init_db(db_url)
         inspector = inspect(engine)
-        
+
         # Получаем список таблиц
         tables = inspector.get_table_names()
         print(f"\nНайдено таблиц: {len(tables)}")
         for table in tables:
             print(f"  - {table}")
-        
+
         # Проверка таблицы videos
         print("\n" + "-"*70)
         print("ПРОВЕРКА ТАБЛИЦЫ 'videos'")
         print("-"*70)
-        
+
         if 'videos' not in tables:
             print("❌ Таблица 'videos' не найдена!")
             return False
-        
+
         print("✅ Таблица 'videos' существует")
-        
+
         columns = inspector.get_columns('videos')
         print(f"\nКолонки ({len(columns)}):")
         required_columns = {
@@ -70,7 +70,7 @@ def check_database_structure():
             'created_at': 'DATETIME',
             'updated_at': 'DATETIME'
         }
-        
+
         column_names = [col['name'] for col in columns]
         for col_name, col_type in required_columns.items():
             if col_name in column_names:
@@ -78,24 +78,24 @@ def check_database_structure():
                 print(f"  ✅ {col_name}: {col_info['type']}")
             else:
                 print(f"  ❌ {col_name}: ОТСУТСТВУЕТ")
-        
+
         # Проверка индексов videos
         indexes = inspector.get_indexes('videos')
         print(f"\nИндексы ({len(indexes)}):")
         for idx in indexes:
             print(f"  - {idx['name']}: {idx['column_names']}")
-        
+
         # Проверка таблицы video_snapshots
         print("\n" + "-"*70)
         print("ПРОВЕРКА ТАБЛИЦЫ 'video_snapshots'")
         print("-"*70)
-        
+
         if 'video_snapshots' not in tables:
             print("❌ Таблица 'video_snapshots' не найдена!")
             return False
-        
+
         print("✅ Таблица 'video_snapshots' существует")
-        
+
         columns = inspector.get_columns('video_snapshots')
         print(f"\nКолонки ({len(columns)}):")
         required_columns = {
@@ -112,7 +112,7 @@ def check_database_structure():
             'created_at': 'DATETIME',
             'updated_at': 'DATETIME'
         }
-        
+
         column_names = [col['name'] for col in columns]
         for col_name, col_type in required_columns.items():
             if col_name in column_names:
@@ -120,13 +120,13 @@ def check_database_structure():
                 print(f"  ✅ {col_name}: {col_info['type']}")
             else:
                 print(f"  ❌ {col_name}: ОТСУТСТВУЕТ")
-        
+
         # Проверка индексов video_snapshots
         indexes = inspector.get_indexes('video_snapshots')
         print(f"\nИндексы ({len(indexes)}):")
         for idx in indexes:
             print(f"  - {idx['name']}: {idx['column_names']}")
-        
+
         # Проверка составного индекса
         composite_index_found = any(
             idx['name'] == 'ix_video_snapshots_video_time' 
@@ -136,44 +136,44 @@ def check_database_structure():
             print("  ✅ Составной индекс 'ix_video_snapshots_video_time' найден")
         else:
             print("  ⚠️  Составной индекс 'ix_video_snapshots_video_time' не найден")
-        
+
         # Проверка внешних ключей
         print("\n" + "-"*70)
         print("ПРОВЕРКА ВНЕШНИХ КЛЮЧЕЙ")
         print("-"*70)
-        
+
         fks = inspector.get_foreign_keys('video_snapshots')
         if fks:
             for fk in fks:
                 print(f"  ✅ {fk['name']}: {fk['constrained_columns']} -> {fk['referred_table']}.{fk['referred_columns']}")
         else:
             print("  ⚠️  Внешние ключи не найдены (возможно, используются relationship в SQLAlchemy)")
-        
+
         # Проверка данных
         print("\n" + "-"*70)
         print("ПРОВЕРКА ДАННЫХ")
         print("-"*70)
-        
+
         with engine.connect() as conn:
             result = conn.execute(text("SELECT COUNT(*) FROM videos"))
             video_count = result.scalar()
             print(f"  Видео: {video_count}")
-            
+
             result = conn.execute(text("SELECT COUNT(*) FROM video_snapshots"))
             snapshot_count = result.scalar()
             print(f"  Снапшотов: {snapshot_count}")
-            
+
             if video_count > 0:
                 result = conn.execute(text("SELECT COUNT(DISTINCT creator_id) FROM videos"))
                 creator_count = result.scalar()
                 print(f"  Уникальных креаторов: {creator_count}")
-        
+
         print("\n" + "="*70)
         print("✅ ПРОВЕРКА ЗАВЕРШЕНА")
         print("="*70)
-        
+
         return True
-        
+
     except ImportError as e:
         print(f"\n❌ ОШИБКА ИМПОРТА: {e}")
         print("Убедитесь, что все зависимости установлены: pip install -r requirements.txt")
@@ -181,7 +181,7 @@ def check_database_structure():
     except Exception as e:
         error_msg = str(e)
         print(f"\n❌ ОШИБКА: {error_msg}")
-        
+
         # Более информативные сообщения для частых ошибок
         if "could not connect" in error_msg.lower() or "connection" in error_msg.lower():
             print("\n💡 Возможные причины:")
@@ -216,7 +216,7 @@ def check_database_structure():
             import traceback
             print("\nПолная информация об ошибке:")
             traceback.print_exc()
-        
+
         return False
 
 

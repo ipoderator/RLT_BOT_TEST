@@ -132,7 +132,7 @@ SQL: SELECT COUNT(*) FROM videos WHERE views_count > 50000;
 Вопрос: "Сколько видео опубликовано в ноябре 2025?"
 SQL: SELECT COUNT(*) FROM videos WHERE DATE(video_created_at) >= DATE '2025-11-01' AND DATE(video_created_at) <= DATE '2025-11-30';
 
-ВАЖНО: 
+ВАЖНО:
 - Всегда возвращай ТОЛЬКО SQL запрос
 - НЕ добавляй объяснения, комментарии или дополнительный текст
 - НЕ используй markdown форматирование
@@ -143,11 +143,11 @@ SQL: SELECT COUNT(*) FROM videos WHERE DATE(video_created_at) >= DATE '2025-11-0
 
 class SQLQueryGenerator:
     """Генератор SQL запросов из естественного языка с помощью GigaChat."""
-    
+
     def __init__(self, credentials: str, scope: str = "GIGACHAT_API_PERS"):
         """
         Инициализация генератора.
-        
+
         Args:
             credentials: Authorization key (токен авторизации) GigaChat
             scope: Область действия API (GIGACHAT_API_PERS, GIGACHAT_API_B2B, GIGACHAT_API_CORP)
@@ -155,7 +155,7 @@ class SQLQueryGenerator:
         self.credentials = credentials
         self.scope = scope
         self._client = None
-    
+
     def _get_client(self) -> GigaChat:
         """Получает или создает клиент GigaChat."""
         if self._client is None:
@@ -165,27 +165,27 @@ class SQLQueryGenerator:
                 verify_ssl_certs=False
             )
         return self._client
-    
+
     def _normalize_query(self, query: str) -> str:
         """
         Нормализует вопрос пользователя для лучшего понимания.
-        
+
         Args:
             query: Исходный вопрос
-        
+
         Returns:
             Нормализованный вопрос
         """
         # Убираем лишние пробелы
         query = ' '.join(query.split())
-        
+
         # Нормализуем числа с пробелами (100 000 -> 100000)
         # Ищем паттерны типа "100 000", "1 000 000" и т.д.
         query = re.sub(r'(\d+)\s+(\d+)', r'\1\2', query)
-        
+
         # Приводим к нижнему регистру для некоторых замен
         query_lower = query.lower()
-        
+
         # Замены для лучшего понимания
         replacements = {
             'сколько всего': 'сколько',
@@ -198,24 +198,24 @@ class SQLQueryGenerator:
             'за все время': 'за всё время',
             'за всё время': 'за всё время',
         }
-        
+
         for old, new in replacements.items():
             if old in query_lower:
                 query = query.replace(old, new)
                 query_lower = query.lower()
-        
+
         return query.strip()
-    
+
     async def generate_sql(self, user_query: str) -> str:
         """
         Генерирует SQL запрос из вопроса на естественном языке.
-        
+
         Args:
             user_query: Вопрос пользователя на русском языке
-        
+
         Returns:
             SQL запрос в виде строки
-        
+
         Raises:
             Exception: При ошибке обращения к API или генерации запроса
         """
@@ -227,29 +227,29 @@ class SQLQueryGenerator:
                 original_query=user_query[:200],
                 normalized_query=normalized_query[:200]
             )
-            
+
             # Формируем полный промпт с четкой инструкцией
             full_prompt = f"""{SYSTEM_PROMPT}
 
 Вопрос пользователя: {normalized_query}
 
 Верни ТОЛЬКО SQL запрос, без объяснений:"""
-            
+
             # Выполняем запрос в отдельном потоке, так как GigaChat синхронный
             client = self._get_client()
-            
+
             # Используем asyncio.to_thread для выполнения синхронного кода
             response = await asyncio.to_thread(
                 client.chat,
                 full_prompt
             )
-            
+
             logger.debug(
                 "Ответ от GigaChat получен",
                 response_type=type(response).__name__,
                 has_choices=hasattr(response, 'choices') and len(response.choices) > 0 if hasattr(response, 'choices') else False
             )
-            
+
             # Извлекаем текст ответа
             text = None
             if hasattr(response, 'choices') and len(response.choices) > 0:
@@ -269,16 +269,16 @@ class SQLQueryGenerator:
                         elif hasattr(value, 'content'):
                             text = value.content.strip()
                             break
-                
+
                 if not text:
                     raise Exception(f"Неожиданный формат ответа от GigaChat: {type(response)}, атрибуты: {dir(response)}")
-            
+
             logger.debug(
                 "Извлеченный текст из ответа",
                 text_preview=text[:200] if text else None,
                 text_length=len(text) if text else 0
             )
-            
+
             # Очищаем ответ от markdown форматирования
             if "```sql" in text:
                 # Извлекаем SQL из блока кода
@@ -292,11 +292,11 @@ class SQLQueryGenerator:
                 # Убираем любые блоки кода
                 text = re.sub(r'```[a-z]*\n?', '', text)
                 text = text.replace("```", "").strip()
-            
+
             # Убираем лишние пробелы и переносы строк, но сохраняем структуру SQL
             lines = [line.strip() for line in text.split('\n') if line.strip()]
             text = ' '.join(lines)
-            
+
             # Убираем возможные префиксы типа "SQL:", "Запрос:" и т.д.
             prefixes = [
                 "SQL:", "sql:", "Запрос:", "запрос:", "Ответ:", "ответ:",
@@ -307,7 +307,7 @@ class SQLQueryGenerator:
                 if text.startswith(prefix):
                     text = text[len(prefix):].strip()
                     break
-            
+
             # Проверяем, что это похоже на SQL запрос
             text_upper = text.upper().strip()
             if not text_upper.startswith("SELECT"):
@@ -338,17 +338,17 @@ class SQLQueryGenerator:
                         normalized_query=normalized_query[:200]
                     )
                     raise Exception(f"Ответ не содержит SQL запрос. Получено: {text[:100]}...")
-            
+
             # Убираем точку с запятой в конце (она не обязательна для выполнения)
             text = text.rstrip(';').strip()
-            
+
             # Финальная проверка
             if not text or len(text) < 10:
                 raise Exception("Пустой или слишком короткий ответ от GigaChat")
-            
+
             if not text.upper().startswith("SELECT"):
                 raise Exception(f"Ответ не начинается с SELECT: {text[:50]}")
-            
+
             logger.info(
                 "SQL запрос успешно сгенерирован",
                 sql_query=text[:500] if len(text) > 500 else text,
@@ -356,7 +356,7 @@ class SQLQueryGenerator:
                 normalized_query=normalized_query[:200]
             )
             return text
-            
+
         except Exception as e:
             logger.exception(
                 "Ошибка при обращении к GigaChat API",
@@ -371,14 +371,14 @@ class SQLQueryGenerator:
 def create_generator() -> Optional[SQLQueryGenerator]:
     """
     Создает генератор SQL запросов из переменных окружения.
-    
+
     Returns:
         SQLQueryGenerator или None, если переменные окружения не настроены
     """
     credentials = os.getenv("GIGACHAT_CREDENTIALS")
     scope = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
-    
+
     if not credentials:
         return None
-    
+
     return SQLQueryGenerator(credentials, scope)

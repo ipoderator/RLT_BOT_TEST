@@ -11,7 +11,7 @@ def fix_dependencies():
     print("="*70)
     print("ИСПРАВЛЕНИЕ ЗАВИСИМОСТЕЙ")
     print("="*70)
-    
+
     print("\n1. Обновление httpx для совместимости с openai...")
     try:
         result = subprocess.run(
@@ -29,14 +29,14 @@ def fix_dependencies():
     except Exception as e:
         print(f"❌ Ошибка: {e}")
         return False
-    
+
     print("\n2. Проверка версий...")
     try:
         import httpx
         import openai
         print(f"✅ httpx версия: {httpx.__version__}")
         print(f"✅ openai версия: {openai.__version__}")
-        
+
         # Проверка совместимости
         httpx_version = tuple(map(int, httpx.__version__.split('.')[:2]))
         if httpx_version >= (0, 27):

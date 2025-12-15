@@ -13,21 +13,21 @@ from database import init_db, get_session, Video, VideoSnapshot
 def download_json(url: str, save_path: str = None) -> str:
     """
     Скачивает JSON файл по URL и сохраняет его локально.
-    
+
     Args:
         url: URL JSON файла
         save_path: Путь для сохранения файла (опционально)
                   Если не указан, используется имя файла из URL или 'data.json'
-    
+
     Returns:
         Путь к сохраненному файлу
     """
     print(f"Скачивание JSON файла с {url}...")
-    
+
     try:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
-        
+
         # Определяем путь для сохранения
         if not save_path:
             # Пробуем извлечь имя файла из URL
@@ -36,14 +36,14 @@ def download_json(url: str, save_path: str = None) -> str:
             if not filename or not filename.endswith('.json'):
                 filename = 'data.json'
             save_path = filename
-        
+
         # Сохраняем файл
         with open(save_path, 'w', encoding='utf-8') as f:
             f.write(response.text)
-        
+
         print(f"Файл успешно скачан и сохранен как {save_path}")
         return save_path
-        
+
     except requests.exceptions.RequestException as e:
         raise Exception(f"Ошибка при скачивании файла: {e}")
 
@@ -52,10 +52,10 @@ def parse_datetime(date_str: str) -> datetime:
     """Парсит строку с датой в объект datetime."""
     if not date_str:
         return datetime.utcnow()
-    
+
     # Убираем timezone информацию для упрощения парсинга
     date_str_clean = date_str.split('+')[0].split('Z')[0]
-    
+
     # Пробуем разные форматы
     formats = [
         "%Y-%m-%dT%H:%M:%S",
@@ -65,13 +65,13 @@ def parse_datetime(date_str: str) -> datetime:
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%dT%H:%M:%S.%fZ",
     ]
-    
+
     for fmt in formats:
         try:
             return datetime.strptime(date_str_clean, fmt)
         except ValueError:
             continue
-    
+
     # Если ничего не подошло, возвращаем текущее время
     print(f"Warning: Could not parse date '{date_str}', using current time")
     return datetime.utcnow()
@@ -80,7 +80,7 @@ def parse_datetime(date_str: str) -> datetime:
 def load_json_to_db(json_path: str, db_url: str = None):
     """
     Загружает данные из JSON файла в базу данных.
-    
+
     Ожидаемый формат JSON - массив объектов videos:
     [
         {
@@ -114,7 +114,7 @@ def load_json_to_db(json_path: str, db_url: str = None):
     ]
     """
     print(f"Loading data from {json_path}...")
-    
+
     # Читаем JSON файл
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
@@ -123,7 +123,7 @@ def load_json_to_db(json_path: str, db_url: str = None):
         raise FileNotFoundError(f"Файл {json_path} не найден")
     except json.JSONDecodeError as e:
         raise ValueError(f"Ошибка при парсинге JSON: {e}")
-    
+
     # Если данные в формате объекта, извлекаем массив
     if isinstance(data, dict):
         if 'videos' in data:
@@ -132,10 +132,10 @@ def load_json_to_db(json_path: str, db_url: str = None):
             data = data['data']
         else:
             raise ValueError("JSON должен быть массивом или объектом с ключом 'videos' или 'data'")
-    
+
     if not isinstance(data, list):
         raise ValueError("Данные должны быть массивом видео")
-    
+
     # Инициализируем БД
     import os
     if not db_url:
@@ -145,42 +145,42 @@ def load_json_to_db(json_path: str, db_url: str = None):
                 "DATABASE_URL не указан. Укажите URL базы данных PostgreSQL "
                 "или установите переменную окружения DATABASE_URL"
             )
-    
+
     # Для синхронной загрузки используем синхронный драйвер
     if db_url.startswith("postgresql+asyncpg://"):
         db_url = db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
     elif not db_url.startswith("postgresql://"):
         db_url = f"postgresql://{db_url}"
-    
+
     engine = init_db(db_url)
     session = get_session(engine)
-    
+
     try:
         loaded_videos = 0
         loaded_snapshots = 0
-        
+
         for video_data in data:
             # Получаем ID видео из данных
             video_id = video_data.get('id')
             if not video_id:
                 print("Warning: Video without id, skipping...")
                 continue
-            
+
             # Проверяем, существует ли уже такое видео
             video = session.query(Video).filter_by(id=video_id).first()
-            
+
             video_created_at = None
             if video_data.get('video_created_at'):
                 video_created_at = parse_datetime(video_data['video_created_at'])
-            
+
             created_at = None
             if video_data.get('created_at'):
                 created_at = parse_datetime(video_data['created_at'])
-            
+
             updated_at = None
             if video_data.get('updated_at'):
                 updated_at = parse_datetime(video_data['updated_at'])
-            
+
             if video:
                 # Обновляем существующее видео
                 video.creator_id = video_data.get('creator_id', video.creator_id)
@@ -206,7 +206,7 @@ def load_json_to_db(json_path: str, db_url: str = None):
                     updated_at=updated_at,
                 )
                 session.add(video)
-            
+
             # Загружаем снапшоты
             snapshots = video_data.get('snapshots', [])
             for snapshot_data in snapshots:
@@ -217,11 +217,11 @@ def load_json_to_db(json_path: str, db_url: str = None):
                 else:
                     print("Warning: Snapshot without created_at, skipping...")
                     continue
-                
+
                 snapshot_updated_at = None
                 if snapshot_data.get('updated_at'):
                     snapshot_updated_at = parse_datetime(snapshot_data['updated_at'])
-                
+
                 # Проверяем, существует ли уже такой снапшот
                 existing = None
                 if snapshot_id:
@@ -232,7 +232,7 @@ def load_json_to_db(json_path: str, db_url: str = None):
                         video_id=video.id,
                         created_at=snapshot_created_at
                     ).first()
-                
+
                 if not existing:
                     # Создаем новый снапшот
                     snapshot_kwargs = {
@@ -247,22 +247,22 @@ def load_json_to_db(json_path: str, db_url: str = None):
                         'delta_reports_count': snapshot_data.get('delta_reports_count', 0),
                         'created_at': snapshot_created_at,
                     }
-                    
+
                     # Добавляем ID только если он есть
                     if snapshot_id:
                         snapshot_kwargs['id'] = snapshot_id
                     if snapshot_updated_at:
                         snapshot_kwargs['updated_at'] = snapshot_updated_at
-                    
+
                     snapshot = VideoSnapshot(**snapshot_kwargs)
                     session.add(snapshot)
                     loaded_snapshots += 1
-            
+
             loaded_videos += 1
-        
+
         session.commit()
         print(f"Successfully loaded {loaded_videos} videos and {loaded_snapshots} snapshots")
-        
+
     except Exception as e:
         session.rollback()
         print(f"Error loading data: {e}")
@@ -278,9 +278,9 @@ if __name__ == "__main__":
         print("  python load_data.py data.json")
         print("  python load_data.py https://example.com/data.json")
         sys.exit(1)
-    
+
     input_path = sys.argv[1]
-    
+
     # Проверяем, является ли входной путь URL
     if input_path.startswith(('http://', 'https://')):
         # Скачиваем файл
@@ -291,7 +291,6 @@ if __name__ == "__main__":
         if not os.path.exists(json_path):
             print(f"Ошибка: файл {json_path} не найден")
             sys.exit(1)
-    
+
     # Загружаем данные в БД
     load_json_to_db(json_path)
-

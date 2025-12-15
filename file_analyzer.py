@@ -20,11 +20,11 @@ CACHE_METADATA_FILE = CACHE_DIR / "metadata.json"
 
 class FileAnalyzer:
     """Класс для анализа JSON файлов и ответов на вопросы через GigaChat."""
-    
+
     def __init__(self, gigachat_credentials: str, gigachat_scope: str = "GIGACHAT_API_PERS"):
         """
         Инициализация анализатора файлов.
-        
+
         Args:
             gigachat_credentials: Authorization key GigaChat
             gigachat_scope: Scope GigaChat API
@@ -35,7 +35,7 @@ class FileAnalyzer:
         self.current_data: Optional[Dict[str, Any]] = None
         self.cached_file_path: Optional[str] = None
         self.cached_file_name: Optional[str] = None
-        
+
         # Создаем папку кэша, если её нет
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,7 +46,7 @@ class FileAnalyzer:
                 error=str(e),
                 error_type=type(e).__name__
             )
-    
+
     def _get_client(self) -> GigaChat:
         """Получает или создает клиент GigaChat."""
         if self._client is None:
@@ -56,14 +56,14 @@ class FileAnalyzer:
                 verify_ssl_certs=False
             )
         return self._client
-    
+
     def _calculate_file_hash(self, file_path: str) -> str:
         """
         Вычисляет хеш файла для проверки изменений.
-        
+
         Args:
             file_path: Путь к файлу
-            
+
         Returns:
             SHA256 хеш файла
         """
@@ -72,40 +72,40 @@ class FileAnalyzer:
             for byte_block in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
-    
+
     def _save_to_cache(self, source_file_path: str, file_name: str) -> str:
         """
         Сохраняет файл в кэш и обновляет метаданные.
-        
+
         Args:
             source_file_path: Путь к исходному файлу
             file_name: Имя файла для сохранения
-            
+
         Returns:
             Путь к сохраненному файлу в кэше
-            
+
         Raises:
             Exception: Если не удалось сохранить файл в кэш
         """
         try:
             # Убеждаемся, что папка кэша существует
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            
+
             # Вычисляем хеш файла
             file_hash = self._calculate_file_hash(source_file_path)
-            
+
             # Очищаем имя файла от недопустимых символов
             safe_file_name = "".join(
                 c for c in file_name if c.isalnum() or c in "._-"
             ) or "file.json"
-            
+
             # Создаем имя файла в кэше на основе хеша
             cache_file_name = f"{file_hash[:16]}_{safe_file_name}"
             cache_file_path = CACHE_DIR / cache_file_name
-            
+
             # Копируем файл в кэш
             shutil.copy2(source_file_path, cache_file_path)
-            
+
             # Сохраняем метаданные
             metadata = {
                 'file_name': file_name,
@@ -114,10 +114,10 @@ class FileAnalyzer:
                 'cached_at': datetime.now().isoformat(),
                 'file_path': str(cache_file_path)
             }
-            
+
             with open(CACHE_METADATA_FILE, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
-            
+
             logger.info(
                 "Файл сохранен в кэш",
                 cache_file=str(cache_file_path),
@@ -136,21 +136,21 @@ class FileAnalyzer:
                 error_type=type(e).__name__
             )
             raise Exception(f"Не удалось сохранить файл в кэш: {e}")
-    
+
     def _load_from_cache(self) -> Optional[str]:
         """
         Загружает файл из кэша, если он существует.
-        
+
         Returns:
             Путь к файлу в кэше или None, если кэш пуст
         """
         if not CACHE_METADATA_FILE.exists():
             return None
-        
+
         try:
             with open(CACHE_METADATA_FILE, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
-            
+
             cache_file_path = metadata.get('file_path')
             if cache_file_path and os.path.exists(cache_file_path):
                 self.cached_file_name = metadata.get('file_name', 'cached_file.json')
@@ -176,7 +176,7 @@ class FileAnalyzer:
                 error_type=type(e).__name__
             )
             return None
-    
+
     def _clear_cache(self):
         """Очищает кэш и метаданные."""
         if CACHE_METADATA_FILE.exists():
@@ -192,7 +192,7 @@ class FileAnalyzer:
                     error=str(e),
                     error_type=type(e).__name__
                 )
-            
+
             try:
                 os.unlink(CACHE_METADATA_FILE)
             except Exception as e:
@@ -202,18 +202,18 @@ class FileAnalyzer:
                     error=str(e),
                     error_type=type(e).__name__
                 )
-        
+
         self.cached_file_path = None
         self.cached_file_name = None
-    
+
     def load_json_file(self, file_path: str, cache: bool = True) -> Dict[str, Any]:
         """
         Загружает JSON файл.
-        
+
         Args:
             file_path: Путь к JSON файлу
             cache: Сохранять ли файл в кэш (по умолчанию True)
-            
+
         Returns:
             Словарь с данными из файла
         """
@@ -221,7 +221,7 @@ class FileAnalyzer:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             self.current_data = data
-            
+
             # Сохраняем в кэш, если указано
             if cache:
                 try:
@@ -241,7 +241,7 @@ class FileAnalyzer:
                         error=str(cache_error),
                         error_type=type(cache_error).__name__
                     )
-            
+
             logger.info(
                 "Файл успешно загружен",
                 file_path=file_path,
@@ -272,25 +272,25 @@ class FileAnalyzer:
                 error_type=type(e).__name__
             )
             raise Exception(f"Ошибка при загрузке файла: {e}")
-    
+
     def _summarize_data(self, data: Dict[str, Any]) -> str:
         """
         Создает краткое описание структуры данных для промпта.
-        
+
         Args:
             data: Данные из JSON файла
-            
+
         Returns:
             Текстовое описание структуры данных
         """
         summary_parts = []
-        
+
         if isinstance(data, dict):
             # Анализируем структуру
             if 'videos' in data and isinstance(data['videos'], list):
                 videos_count = len(data['videos'])
                 summary_parts.append(f"Файл содержит {videos_count} видео.")
-                
+
                 if videos_count > 0:
                     first_video = data['videos'][0]
                     summary_parts.append("\nСтруктура данных о видео:")
@@ -301,7 +301,7 @@ class FileAnalyzer:
                     summary_parts.append(f"- likes_count: {first_video.get('likes_count', 'N/A')}")
                     summary_parts.append(f"- comments_count: {first_video.get('comments_count', 'N/A')}")
                     summary_parts.append(f"- reports_count: {first_video.get('reports_count', 'N/A')}")
-                    
+
                     # Проверяем наличие snapshots
                     if 'snapshots' in first_video and isinstance(first_video['snapshots'], list):
                         snapshots_count = len(first_video['snapshots'])
@@ -316,7 +316,7 @@ class FileAnalyzer:
                             summary_parts.append(f"- delta_views_count: {first_snapshot.get('delta_views_count', 'N/A')}")
                             summary_parts.append(f"- delta_likes_count: {first_snapshot.get('delta_likes_count', 'N/A')}")
                             summary_parts.append(f"- created_at: {first_snapshot.get('created_at', 'N/A')}")
-            
+
             # Добавляем статистику
             summary_parts.append("\nОбщая статистика:")
             if 'videos' in data and isinstance(data['videos'], list):
@@ -327,37 +327,37 @@ class FileAnalyzer:
                 summary_parts.append(f"- Сумма просмотров: {total_views}")
                 summary_parts.append(f"- Сумма лайков: {total_likes}")
                 summary_parts.append(f"- Сумма комментариев: {total_comments}")
-        
+
         return "\n".join(summary_parts)
-    
+
     def _extract_number(self, text: str) -> str:
         """
         Извлекает число из текста ответа.
-        
+
         Args:
             text: Текст ответа от GigaChat
-            
+
         Returns:
             Число в виде строки без пробелов и символов форматирования
         """
         # Убираем LaTeX-форматирование ($$ ... $$)
         text = re.sub(r'\$\$.*?\$\$', '', text, flags=re.DOTALL)
         text = re.sub(r'\$[^$]*?\$', '', text)
-        
+
         # Убираем markdown-форматирование для кода
         text = re.sub(r'```[a-z]*\n?', '', text)
         text = text.replace('```', '')
-        
+
         # Убираем markdown жирный текст (**текст**)
         text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
         text = re.sub(r'\*([^*]+)\*', r'\1', text)
-        
+
         # Ищем число в тексте (может быть с пробелами как разделителями тысяч)
         # Паттерн: последовательность цифр, возможно разделенных пробелами
         # Примеры: "3 326 609", "3326609", "150", "85 234"
         number_pattern = r'[\d\s]+'
         matches = re.findall(number_pattern, text)
-        
+
         if matches:
             # Берем самое длинное совпадение (скорее всего это искомое число)
             longest_match = max(matches, key=lambda x: len(re.sub(r'\s', '', x)))
@@ -366,11 +366,11 @@ class FileAnalyzer:
             # Проверяем, что это действительно число
             if number.isdigit():
                 return number
-        
+
         # Если не нашли число, пробуем найти любое число (включая десятичные)
         decimal_pattern = r'\d+[.,]?\d*'
         decimal_matches = re.findall(decimal_pattern, text)
-        
+
         if decimal_matches:
             # Берем первое найденное число
             number_str = decimal_matches[0].replace(',', '.').replace(' ', '')
@@ -382,58 +382,58 @@ class FileAnalyzer:
                 return str(int(num))  # Все равно возвращаем целое число
             except ValueError:
                 pass
-        
+
         # Если ничего не найдено, возвращаем 0
         return "0"
-    
+
     def _clean_response(self, text: str) -> str:
         """
         Очищает ответ от лишних символов форматирования.
-        
+
         Args:
             text: Исходный текст ответа
-            
+
         Returns:
             Очищенный текст
         """
         # Убираем LaTeX-форматирование ($$ ... $$)
         text = re.sub(r'\$\$.*?\$\$', '', text, flags=re.DOTALL)
         text = re.sub(r'\$[^$]*?\$', '', text)
-        
+
         # Убираем markdown-форматирование для кода
         text = re.sub(r'```[a-z]*\n?', '', text)
         text = text.replace('```', '')
-        
+
         # Убираем лишние переносы строк (более 2 подряд)
         text = re.sub(r'\n{3,}', '\n\n', text)
-        
+
         # Убираем лишние пробелы (но сохраняем один пробел между словами)
         text = re.sub(r'[ \t]+', ' ', text)
-        
+
         # Убираем пробелы в начале и конце строк
         lines = [line.strip() for line in text.split('\n')]
         text = '\n'.join(lines)
-        
+
         # Убираем пустые строки в начале и конце
         text = text.strip()
-        
+
         return text
-    
+
     def _prepare_data_context(self, data: Dict[str, Any], max_size: int = 50000) -> str:
         """
         Подготавливает контекст данных для промпта.
         Если данные слишком большие, создает сводку.
-        
+
         Args:
             data: Данные из JSON файла
             max_size: Максимальный размер контекста в символах
-            
+
         Returns:
             Текстовое представление данных
         """
         # Преобразуем данные в JSON строку
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
-        
+
         # Если данные слишком большие, создаем сводку
         if len(json_str) > max_size:
             logger.info(
@@ -443,7 +443,7 @@ class FileAnalyzer:
                 reduction_percent=round((1 - max_size / len(json_str)) * 100, 1)
             )
             summary = self._summarize_data(data)
-            
+
             # Добавляем примеры данных
             if isinstance(data, dict) and 'videos' in data and isinstance(data['videos'], list):
                 # Берем первые 3 видео как примеры
@@ -452,28 +452,28 @@ class FileAnalyzer:
                 }
                 sample_json = json.dumps(sample_data, ensure_ascii=False, indent=2)
                 return f"{summary}\n\nПримеры данных (первые 3 видео):\n{sample_json}"
-            
+
             return summary
-        
+
         return json_str
-    
+
     async def answer_question(self, question: str) -> str:
         """
         Отвечает на вопрос пользователя на основе загруженных данных.
-        
+
         Args:
             question: Вопрос пользователя на русском языке
-            
+
         Returns:
             Ответ на вопрос
         """
         if self.current_data is None:
             raise ValueError("Данные не загружены. Сначала загрузите JSON файл.")
-        
+
         try:
             # Подготавливаем контекст данных
             data_context = self._prepare_data_context(self.current_data)
-            
+
             # Формируем промпт для GigaChat
             system_prompt = """Ты - помощник для анализа данных о видео и их статистике.
 Твоя задача - отвечать на вопросы пользователя на основе предоставленных данных.
@@ -513,7 +513,7 @@ class FileAnalyzer:
     - created_at: время замера
 
 Верни ТОЛЬКО число без текста:"""
-            
+
             user_prompt = f"""Данные:
 
 {data_context}
@@ -521,18 +521,18 @@ class FileAnalyzer:
 Вопрос пользователя: {question}
 
 Верни ТОЛЬКО число без текста, пробелов и символов форматирования."""
-            
+
             # Выполняем запрос к GigaChat
             client = self._get_client()
-            
+
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
-            
+
             # Используем asyncio.to_thread для выполнения синхронного кода
             response = await asyncio.to_thread(
                 client.chat,
                 full_prompt
             )
-            
+
             # Извлекаем текст ответа
             text = None
             if hasattr(response, 'choices') and len(response.choices) > 0:
@@ -552,28 +552,28 @@ class FileAnalyzer:
                         elif hasattr(value, 'content'):
                             text = value.content.strip()
                             break
-                
+
                 if not text:
                     raise Exception(f"Неожиданный формат ответа от GigaChat: {type(response)}")
-            
+
             logger.info(
                 "Ответ от GigaChat получен",
                 question=question[:100] + "..." if len(question) > 100 else question,
                 response_preview=text[:100] + "..." if len(text) > 100 else text,
                 response_length=len(text)
             )
-            
+
             # Извлекаем число из ответа
             number = self._extract_number(text)
-            
+
             logger.debug(
                 "Число извлечено из ответа",
                 extracted_number=number,
                 original_response=text[:200]
             )
-            
+
             return number
-            
+
         except Exception as e:
             logger.exception(
                 "Ошибка при обработке вопроса",
@@ -583,11 +583,11 @@ class FileAnalyzer:
                 error_type=type(e).__name__
             )
             raise Exception(f"Ошибка при обработке вопроса: {e}")
-    
+
     def has_data(self) -> bool:
         """Проверяет, загружены ли данные."""
         return self.current_data is not None
-    
+
     def clear_data(self):
         """Очищает загруженные данные и кэш."""
         self.current_data = None
@@ -597,11 +597,11 @@ class FileAnalyzer:
             had_cached_file=(self.cached_file_path is not None),
             cached_file_name=self.cached_file_name
         )
-    
+
     def load_cached_file(self) -> bool:
         """
         Загружает файл из кэша, если он существует.
-        
+
         Returns:
             True если файл был загружен, False иначе
         """
@@ -621,21 +621,21 @@ class FileAnalyzer:
                 self._clear_cache()
                 return False
         return False
-    
+
     def get_cached_file_info(self) -> Optional[Dict[str, Any]]:
         """
         Возвращает информацию о закэшированном файле.
-        
+
         Returns:
             Словарь с информацией о файле или None
         """
         if not CACHE_METADATA_FILE.exists():
             return None
-        
+
         try:
             with open(CACHE_METADATA_FILE, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
-            
+
             cache_file_path = metadata.get('file_path')
             if cache_file_path and os.path.exists(cache_file_path):
                 return metadata
@@ -648,4 +648,3 @@ class FileAnalyzer:
                 error_type=type(e).__name__
             )
             return None
-

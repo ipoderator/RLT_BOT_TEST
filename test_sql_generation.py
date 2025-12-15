@@ -14,11 +14,11 @@ load_dotenv()
 
 async def test_sql_generation():
     """Тестирует генерацию SQL для различных типов запросов."""
-    
+
     gigachat_credentials = os.getenv("GIGACHAT_CREDENTIALS")
     gigachat_scope = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
     db_url = os.getenv("DATABASE_URL")
-    
+
     if not gigachat_credentials:
         print("="*70)
         print("⚠️  GIGACHAT_CREDENTIALS не найден")
@@ -28,7 +28,7 @@ async def test_sql_generation():
         print("Получить ключ: https://developers.sber.ru/gigachat")
         print("="*70)
         return
-    
+
     if not db_url:
         print("="*70)
         print("⚠️  DATABASE_URL не найден")
@@ -38,10 +38,10 @@ async def test_sql_generation():
         print("Формат: postgresql://user:password@host:port/database_name")
         print("="*70)
         return
-    
+
     generator = SQLQueryGenerator(credentials=gigachat_credentials, scope=gigachat_scope)
     analytics = VideoAnalytics(db_url=db_url, gigachat_credentials=gigachat_credentials, gigachat_scope=gigachat_scope)
-    
+
     test_cases = [
         {
             "name": "Подсчет всех видео",
@@ -102,23 +102,23 @@ async def test_sql_generation():
             "should_not_contain": ["videos"]
         }
     ]
-    
+
     print("="*70)
     print("ПРОВЕРКА ГЕНЕРАЦИИ SQL ЗАПРОСОВ")
     print("="*70)
-    
+
     passed = 0
     failed = 0
-    
+
     for i, test_case in enumerate(test_cases, 1):
         print(f"\n{i}. {test_case['name']}")
         print(f"   Запрос: {test_case['query']}")
-        
+
         try:
             # Генерируем SQL
             sql = await generator.generate_sql(test_case['query'])
             print(f"   Сгенерированный SQL: {sql}")
-            
+
             # Проверка паттернов
             patterns_match = True
             for pattern in test_case['expected_patterns']:
@@ -127,38 +127,38 @@ async def test_sql_generation():
                     patterns_match = False
                 else:
                     print(f"   ✅ Паттерн найден: {pattern}")
-            
+
             # Проверка обязательных элементов
             contains_all = True
             for item in test_case['should_contain']:
                 if item.lower() not in sql.lower():
                     print(f"   ❌ Должно содержать: {item}")
                     contains_all = False
-            
+
             # Проверка отсутствия элементов
             not_contains_all = True
             for item in test_case['should_not_contain']:
                 if item.lower() in sql.lower():
                     print(f"   ❌ Не должно содержать: {item}")
                     not_contains_all = False
-            
+
             # Проверка валидации (базовая проверка на SELECT)
             is_valid = sql.upper().strip().startswith('SELECT')
             if not is_valid:
                 print("   ❌ SQL не начинается с SELECT")
-            
+
             # Проверка выполнения
             try:
                 answer = await analytics.answer_question(test_case['query'])
                 print(f"   Ответ: {answer}")
-                
+
                 # Проверка формата ответа
                 if not (answer.replace('.', '').replace('-', '').isdigit() or answer == "Данные не найдены"):
                     print("   ⚠️  Формат ответа некорректен")
             except Exception as e:
                 print(f"   ⚠️  Ошибка выполнения: {e}")
                 answer_format_ok = False
-            
+
             # Итоговая оценка
             if patterns_match and contains_all and not_contains_all:
                 print("   ✅ ТЕСТ ПРОЙДЕН")
@@ -166,15 +166,15 @@ async def test_sql_generation():
             else:
                 print("   ❌ ТЕСТ НЕ ПРОЙДЕН")
                 failed += 1
-                
+
         except Exception as e:
             print(f"   ❌ ОШИБКА: {e}")
             failed += 1
-    
+
     print("\n" + "="*70)
     print(f"ИТОГИ: Пройдено: {passed}, Не пройдено: {failed}, Всего: {passed + failed}")
     print("="*70)
-    
+
     await analytics.close()
 
 
