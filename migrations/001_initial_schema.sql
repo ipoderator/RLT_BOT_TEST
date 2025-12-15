@@ -47,3 +47,5 @@ CREATE INDEX IF NOT EXISTS ix_video_snapshots_created_at ON video_snapshots(crea
 CREATE INDEX IF NOT EXISTS ix_video_snapshots_video_id_created_at
     ON video_snapshots(video_id, created_at);
 
+
+

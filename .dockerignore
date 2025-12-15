@@ -28,22 +28,42 @@ Thumbs.db
 .gitignore
 
 # Logs
-logs/*.log
+logs/
+*.log
 
 # Cache (но сохраняем структуру директории)
-cache/*.json
-cache/metadata.json
+cache/
+src/cache/
 
-# Documentation (опционально, можно включить)
-# *.md
-# !README.md
-
-# Tests
+# Tests - исключаем все тестовые файлы
+tests/
 test_*.py
 *_test.py
+run_all_tests.py
+
+# Документация разработки (оставляем только README.md)
+ARCHITECTURE.md
+COMPONENTS.md
+QUICK_START.md
+
+# Скрипты разработки (оставляем только load_data.py для загрузки данных)
+scripts/check_db_compliance.py
+scripts/fix_all_issues.py
+scripts/fix_dependencies.py
+scripts/setup_env.py
+scripts/watch_bot.py
+check_db_compliance.py
+fix_all_issues.py
+
+# Дублирующиеся файлы в корне (используем версии из src/)
+bot.py
+database.py
+file_analyzer.py
 
 # Other
 *.db
 *.sqlite
 *.sqlite3
+
+
 

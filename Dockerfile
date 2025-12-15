@@ -23,7 +23,10 @@ RUN mkdir -p logs cache
 
 # Устанавливаем переменные окружения по умолчанию
 ENV PYTHONUNBUFFERED=1
+ENV AUTO_RELOAD=true
 
 # Команда запуска бота
-CMD ["python", "bot.py"]
+# Используем скрипт автоперезагрузки если AUTO_RELOAD=true
+# Для продакшена установите AUTO_RELOAD=false
+CMD ["sh", "-c", "if [ \"$AUTO_RELOAD\" = \"true\" ]; then python scripts/watch_bot.py; else python -m src.bot; fi"]
 

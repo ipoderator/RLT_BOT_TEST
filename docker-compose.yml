@@ -31,7 +31,10 @@ services:
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-video_analytics}
+      AUTO_RELOAD: ${AUTO_RELOAD:-true}
     volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
       - ./logs:/app/logs
       - ./cache:/app/cache
     restart: unless-stopped

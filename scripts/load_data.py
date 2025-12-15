@@ -5,9 +5,15 @@ import json
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 import requests
-from database import init_db, get_session, Video, VideoSnapshot
+
+# Добавляем корневую директорию проекта в путь
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.database import init_db, get_session, Video, VideoSnapshot  # noqa: E402
 
 
 def download_json(url: str, save_path: str = None) -> str:
